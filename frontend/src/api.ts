@@ -8,7 +8,24 @@ export const defaultSearchModifiers = {
   resultLimit: 10,
 } as const
 
-const apiBase = import.meta.env.VITE_API_BASE?.trim() || '/api'
+const configuredApiBase = import.meta.env.VITE_API_BASE?.trim()
+
+function normalizeApiBase(base: string): string {
+  if (base === '/') {
+    return ''
+  }
+
+  return base.replace(/\/+$/, '')
+}
+
+const apiBases = configuredApiBase != null && configuredApiBase !== ''
+  ? [normalizeApiBase(configuredApiBase)]
+  : ['/api', '']
+
+function buildApiURL(path: string, base: string): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return `${base}${normalizedPath}`
+}
 
 type ApiErrorPayload = {
   error?: string
@@ -45,6 +62,12 @@ export type SearchResult = {
   semantic_score: number
   temporal_score: number
   combined_score: number
+}
+
+export type RecentDocument = {
+  title: string
+  processing_time?: number
+  processing_error?: string
 }
 
 export function validateUploadFile(file: File | null): string | null {
@@ -87,6 +110,17 @@ async function parseError(response: Response, fallback: string): Promise<string>
   }
 }
 
+async function fetchAPI(path: string, init?: RequestInit): Promise<Response> {
+  for (const [index, base] of apiBases.entries()) {
+    const response = await fetch(buildApiURL(path, base), init)
+    if (response.status !== 404 || index === apiBases.length - 1) {
+      return response
+    }
+  }
+
+  throw new Error('Не удалось выполнить запрос')
+}
+
 export async function uploadDocument(input: UploadDocumentInput): Promise<UploadResponse> {
   const body = new FormData()
   body.append('file', input.file)
@@ -102,7 +136,7 @@ export async function uploadDocument(input: UploadDocumentInput): Promise<Upload
     body.append('version', String(input.version))
   }
 
-  const response = await fetch(`${apiBase}/documents`, {
+  const response = await fetchAPI('/documents', {
     method: 'POST',
     body,
   })
@@ -115,7 +149,7 @@ export async function uploadDocument(input: UploadDocumentInput): Promise<Upload
 }
 
 export async function search(input: SearchInput): Promise<SearchResult[]> {
-  const response = await fetch(`${apiBase}/search`, {
+  const response = await fetchAPI('/search', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -129,4 +163,14 @@ export async function search(input: SearchInput): Promise<SearchResult[]> {
 
   const payload = (await response.json()) as { results: SearchResult[] }
   return payload.results
+}
+
+export async function fetchRecentDocuments(): Promise<RecentDocument[]> {
+  const response = await fetchAPI('/documents/recent')
+  if (!response.ok) {
+    throw new Error(await parseError(response, 'Не удалось получить последние документы'))
+  }
+
+  const payload = (await response.json()) as { documents: RecentDocument[] }
+  return payload.documents
 }

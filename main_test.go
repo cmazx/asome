@@ -22,6 +22,7 @@ import (
 type stubRepository struct {
 	createDocumentFn           func(ctx context.Context, doc *document) error
 	temporalSearchFn           func(ctx context.Context, embedding []float64, params temporalSearchParams) ([]searchResult, error)
+	listRecentDocumentsFn      func(ctx context.Context, limit int) ([]document, error)
 	listPendingDocumentsFn     func(ctx context.Context, limit int) ([]document, error)
 	clearDocumentChunksFn      func(ctx context.Context, documentID uuid.UUID) error
 	appendDocumentChunksFn     func(ctx context.Context, chunks []chunk) error
@@ -46,6 +47,13 @@ func (s *stubRepository) temporalSearch(ctx context.Context, embedding []float64
 func (s *stubRepository) listPendingDocuments(ctx context.Context, limit int) ([]document, error) {
 	if s.listPendingDocumentsFn != nil {
 		return s.listPendingDocumentsFn(ctx, limit)
+	}
+	return nil, nil
+}
+
+func (s *stubRepository) listRecentDocuments(ctx context.Context, limit int) ([]document, error) {
+	if s.listRecentDocumentsFn != nil {
+		return s.listRecentDocumentsFn(ctx, limit)
 	}
 	return nil, nil
 }
@@ -194,6 +202,72 @@ func TestUploadDocumentHandlerValidation(t *testing.T) {
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.Code)
 	}
+}
+
+func TestRecentDocumentsHandlerSuccess(t *testing.T) {
+	processingError := "failed to process"
+	appInstance := &App{
+		repo: &stubRepository{listRecentDocumentsFn: func(_ context.Context, limit int) ([]document, error) {
+			if limit != defaultRecentDocuments {
+				t.Fatalf("unexpected recent documents limit: %d", limit)
+			}
+
+			return []document{
+				{Title: "alpha.txt", ProcessingTime: ptr(12)},
+				{Title: "beta.txt", ProcessingError: &processingError},
+			}, nil
+		}},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/documents/recent", nil)
+	res := httptest.NewRecorder()
+
+	appInstance.recentDocumentsHandler(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, res.Code)
+	}
+
+	var payload recentDocumentsResponse
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Documents) != 2 {
+		t.Fatalf("unexpected documents count: %d", len(payload.Documents))
+	}
+	if payload.Documents[0].Title != "alpha.txt" {
+		t.Fatalf("unexpected first title: %s", payload.Documents[0].Title)
+	}
+	if payload.Documents[0].ProcessingTime == nil || *payload.Documents[0].ProcessingTime != 12 {
+		t.Fatalf("unexpected first processing_time: %v", payload.Documents[0].ProcessingTime)
+	}
+	if payload.Documents[1].Title != "beta.txt" {
+		t.Fatalf("unexpected second title: %s", payload.Documents[1].Title)
+	}
+	if payload.Documents[1].ProcessingError == nil || *payload.Documents[1].ProcessingError != processingError {
+		t.Fatalf("unexpected second processing_error: %v", payload.Documents[1].ProcessingError)
+	}
+}
+
+func TestRecentDocumentsHandlerRepositoryError(t *testing.T) {
+	appInstance := &App{
+		repo: &stubRepository{listRecentDocumentsFn: func(_ context.Context, _ int) ([]document, error) {
+			return nil, errors.New("db unavailable")
+		}},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/documents/recent", nil)
+	res := httptest.NewRecorder()
+
+	appInstance.recentDocumentsHandler(res, req)
+
+	if res.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, res.Code)
+	}
+}
+
+func ptr(value int) *int {
+	return &value
 }
 
 func TestSearchHandlerDefaultParameters(t *testing.T) {

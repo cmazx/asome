@@ -61,6 +61,35 @@ body {
   backdrop-filter: blur(6px);
 }
 
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.card-header h2 {
+  margin: 0;
+}
+
+.card-content {
+  margin-top: 14px;
+}
+
+.card-toggle {
+  width: auto;
+  padding: 8px 12px;
+  border: 1px solid #475569;
+  background: rgba(51, 65, 85, 0.45);
+  color: #dbeafe;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.card-toggle:hover {
+  background: rgba(71, 85, 105, 0.55);
+}
+
 .card h2 {
   margin-top: 0;
 }
@@ -196,4 +225,15 @@ button:disabled {
   flex-wrap: wrap;
   color: #cbd5e1;
   font-size: 13px;
+}
+
+.recent-documents {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.recent-document-item {
+  color: #dbeafe;
 }

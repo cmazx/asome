@@ -26,13 +26,14 @@ import (
 )
 
 const (
-	maxUploadSizeBytes    = 100 << 20
-	defaultTimeDecayDays  = 365.0
-	defaultSemanticWeight = 0.7
-	defaultFulltextWeight = 0.2
-	defaultTempWeight     = 0.3
-	defaultResultLimit    = 10
-	defaultEmbeddingModel = "qwen3-embedding:4b"
+	maxUploadSizeBytes     = 100 << 20
+	defaultTimeDecayDays   = 365.0
+	defaultSemanticWeight  = 0.7
+	defaultFulltextWeight  = 0.2
+	defaultTempWeight      = 0.3
+	defaultResultLimit     = 10
+	defaultRecentDocuments = 5
+	defaultEmbeddingModel  = "qwen3-embedding:4b"
 
 	defaultProcessingPollInterval = 2 * time.Second
 	defaultProcessingBatchLimit   = 20
@@ -110,6 +111,7 @@ type temporalSearchParams struct {
 type repository interface {
 	createDocument(ctx context.Context, doc *document) error
 	temporalSearch(ctx context.Context, embedding []float64, params temporalSearchParams) ([]searchResult, error)
+	listRecentDocuments(ctx context.Context, limit int) ([]document, error)
 	listPendingDocuments(ctx context.Context, limit int) ([]document, error)
 	clearDocumentChunks(ctx context.Context, documentID uuid.UUID) error
 	appendDocumentChunks(ctx context.Context, chunks []chunk) error
@@ -197,6 +199,20 @@ func (r *gormRepository) listPendingDocuments(ctx context.Context, limit int) ([
 		Where("temporal_path IS NOT NULL AND temporal_path <> ''").
 		Where("processing_error IS NULL").
 		Order("created_at ASC").
+		Limit(limit).
+		Find(&docs).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return docs, nil
+}
+
+func (r *gormRepository) listRecentDocuments(ctx context.Context, limit int) ([]document, error) {
+	var docs []document
+	err := r.db.WithContext(ctx).
+		Select("title", "processing_time", "processing_error", "created_at").
+		Order("created_at DESC").
 		Limit(limit).
 		Find(&docs).Error
 	if err != nil {
@@ -660,6 +676,16 @@ type uploadResponse struct {
 	TemporalPath string    `json:"temporal_path"`
 }
 
+type recentDocumentResponseItem struct {
+	Title           string  `json:"title"`
+	ProcessingTime  *int    `json:"processing_time,omitzero"`
+	ProcessingError *string `json:"processing_error,omitzero"`
+}
+
+type recentDocumentsResponse struct {
+	Documents []recentDocumentResponseItem `json:"documents"`
+}
+
 type searchRequest struct {
 	Query          string     `json:"query"`
 	QueryTime      *time.Time `json:"query_time,omitzero"`
@@ -737,6 +763,25 @@ func (a *App) uploadDocumentHandler(w http.ResponseWriter, r *http.Request) {
 		ID:           doc.ID,
 		TemporalPath: tempFilePath,
 	})
+}
+
+func (a *App) recentDocumentsHandler(w http.ResponseWriter, r *http.Request) {
+	docs, err := a.repo.listRecentDocuments(r.Context(), defaultRecentDocuments)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to list recent documents")
+		return
+	}
+
+	items := make([]recentDocumentResponseItem, 0, len(docs))
+	for _, doc := range docs {
+		items = append(items, recentDocumentResponseItem{
+			Title:           doc.Title,
+			ProcessingTime:  doc.ProcessingTime,
+			ProcessingError: doc.ProcessingError,
+		})
+	}
+
+	respondJSON(w, http.StatusOK, recentDocumentsResponse{Documents: items})
 }
 
 func (a *App) searchHandler(w http.ResponseWriter, r *http.Request) {
@@ -945,6 +990,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /documents", application.uploadDocumentHandler)
+	mux.HandleFunc("GET /documents/recent", application.recentDocumentsHandler)
 	mux.HandleFunc("POST /search", application.searchHandler)
 
 	server := &http.Server{

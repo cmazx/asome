@@ -1,6 +1,8 @@
-import { FormEvent, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import {
   defaultSearchModifiers,
+  fetchRecentDocuments,
+  RecentDocument,
   search,
   SearchResult,
   uploadDocument,
@@ -17,9 +19,14 @@ export function App() {
   const [source, setSource] = useState('')
   const [docType, setDocType] = useState('')
   const [version, setVersion] = useState('1')
+  const [isUploadSectionOpen, setIsUploadSectionOpen] = useState(false)
   const [uploadMessage, setUploadMessage] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [isRecentDocumentsSectionOpen, setIsRecentDocumentsSectionOpen] = useState(false)
+  const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([])
+  const [recentDocumentsError, setRecentDocumentsError] = useState<string | null>(null)
+  const [isRecentDocumentsLoading, setIsRecentDocumentsLoading] = useState(true)
 
   const [query, setQuery] = useState('')
   const [filterScope, setFilterScope] = useState('')
@@ -36,6 +43,35 @@ export function App() {
     () => semanticWeight + fulltextWeight + tempWeight,
     [semanticWeight, fulltextWeight, tempWeight],
   )
+
+  async function loadRecentDocuments() {
+    setRecentDocumentsError(null)
+    setIsRecentDocumentsLoading(true)
+    try {
+      const recent = await fetchRecentDocuments()
+      setRecentDocuments(recent)
+    } catch (error) {
+      setRecentDocumentsError(error instanceof Error ? error.message : 'Не удалось получить последние документы')
+    } finally {
+      setIsRecentDocumentsLoading(false)
+    }
+  }
+
+  function recentDocumentStatus(document: RecentDocument): string {
+    const processingError = document.processing_error?.trim()
+    if (processingError != null && processingError !== '') {
+      return `ошибка: ${processingError}`
+    }
+    if (document.processing_time != null) {
+      return `processing time: ${document.processing_time} c`
+    }
+
+    return 'в обработке'
+  }
+
+  useEffect(() => {
+    void loadRecentDocuments()
+  }, [])
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -69,6 +105,7 @@ export function App() {
         docType,
         version: parsedVersion,
       })
+      await loadRecentDocuments()
       setUploadMessage(`Документ загружен: ${uploaded.id}`)
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'Не удалось загрузить документ')
@@ -110,60 +147,106 @@ export function App() {
     <div className="app-shell">
       <header className="hero">
         <span className="brand">[A]some</span>
-        <h1>Temporal Semantic Search</h1>
-        <p>Загрузка документов и поиск по чанкам с управляемыми модификаторами.</p>
+        <h1>Поиск</h1>
       </header>
 
       <main className="layout">
         <section className="card">
-          <h2>1) Загрузка .txt документа</h2>
-          <form onSubmit={handleUpload} className="form-grid">
-            <label>
-              Файл (`.txt`, до 100 МБ)
-              <input
-                type="file"
-                accept=".txt,text/plain"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-              />
-            </label>
-
-            <label>
-              Scope *
-              <input value={scope} onChange={(event) => setScope(event.target.value)} required />
-            </label>
-
-            <div className="row two-cols">
-              <label>
-                Source
-                <input value={source} onChange={(event) => setSource(event.target.value)} />
-              </label>
-              <label>
-                Doc type
-                <input value={docType} onChange={(event) => setDocType(event.target.value)} />
-              </label>
-            </div>
-
-            <label>
-              Version
-              <input
-                type="number"
-                min={1}
-                step={1}
-                value={version}
-                onChange={(event) => setVersion(event.target.value)}
-              />
-            </label>
-
-            <button type="submit" disabled={isUploading}>
-              {isUploading ? 'Загрузка...' : 'Загрузить документ'}
+          <div className="card-header">
+            <h2>Загрузка .txt документа</h2>
+            <button
+              type="button"
+              className="card-toggle"
+              onClick={() => setIsUploadSectionOpen((isOpen) => !isOpen)}
+            >
+              {isUploadSectionOpen ? 'Свернуть' : 'Развернуть'}
             </button>
-          </form>
-          {uploadError != null ? <p className="message error">{uploadError}</p> : null}
-          {uploadMessage != null ? <p className="message success">{uploadMessage}</p> : null}
+          </div>
+
+          {isUploadSectionOpen ? (
+            <div className="card-content">
+              <form onSubmit={handleUpload} className="form-grid">
+                <label>
+                  Файл (`.txt`, до 100 МБ)
+                  <input
+                    type="file"
+                    accept=".txt,text/plain"
+                    onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                  />
+                </label>
+
+                <label>
+                  Scope *
+                  <input value={scope} onChange={(event) => setScope(event.target.value)} required />
+                </label>
+
+                <div className="row two-cols">
+                  <label>
+                    Source
+                    <input value={source} onChange={(event) => setSource(event.target.value)} />
+                  </label>
+                  <label>
+                    Doc type
+                    <input value={docType} onChange={(event) => setDocType(event.target.value)} />
+                  </label>
+                </div>
+
+                <label>
+                  Version
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={version}
+                    onChange={(event) => setVersion(event.target.value)}
+                  />
+                </label>
+
+                <button type="submit" disabled={isUploading}>
+                  {isUploading ? 'Загрузка...' : 'Загрузить документ'}
+                </button>
+              </form>
+              {uploadError != null ? <p className="message error">{uploadError}</p> : null}
+              {uploadMessage != null ? <p className="message success">{uploadMessage}</p> : null}
+            </div>
+          ) : null}
         </section>
 
         <section className="card">
-          <h2>2) Поиск по чанкам</h2>
+          <div className="card-header">
+            <h2>Последние 5 документов</h2>
+            <button
+              type="button"
+              className="card-toggle"
+              onClick={() => setIsRecentDocumentsSectionOpen((isOpen) => !isOpen)}
+            >
+              {isRecentDocumentsSectionOpen ? 'Свернуть' : 'Развернуть'}
+            </button>
+          </div>
+
+          {isRecentDocumentsSectionOpen ? (
+            <div className="card-content">
+              {isRecentDocumentsLoading ? (
+                <p className="empty">Загрузка...</p>
+              ) : recentDocumentsError != null ? (
+                <p className="message error">{recentDocumentsError}</p>
+              ) : recentDocuments.length === 0 ? (
+                <p className="empty">Документы пока отсутствуют.</p>
+              ) : (
+                <ul className="recent-documents">
+                  {recentDocuments.map((document, index) => (
+                    <li key={`${document.title}-${index}`} className="recent-document-item">
+                      {document.title} — {recentDocumentStatus(document)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="card">
+          <h2>Поиск</h2>
           <form onSubmit={handleSearch} className="form-grid">
             <label>
               Запрос *
@@ -228,7 +311,6 @@ export function App() {
               {isSearching ? 'Поиск...' : 'Найти'}
             </button>
           </form>
-
           {searchError != null ? <p className="message error">{searchError}</p> : null}
 
           <div className="results">
