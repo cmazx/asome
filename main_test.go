@@ -264,7 +264,7 @@ func TestSearchHandlerFulltextWeightOverride(t *testing.T) {
 		}},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(`{"query":"test","fulltext_weight":0.4}`))
+	req := httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(`{"query":"test","fulltext_weight":0.4,"filter_scope":"hr"}`))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
 
@@ -275,6 +275,9 @@ func TestSearchHandlerFulltextWeightOverride(t *testing.T) {
 	}
 	if capturedParams.FulltextWeight != 0.4 {
 		t.Fatalf("unexpected fulltext_weight: %v", capturedParams.FulltextWeight)
+	}
+	if capturedParams.FilterScope == nil || *capturedParams.FilterScope != "hr" {
+		t.Fatalf("unexpected filter_scope: %v", capturedParams.FilterScope)
 	}
 }
 
@@ -647,7 +650,11 @@ func TestPersistToTemporaryFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sample file: %v", err)
 	}
-	defer source.Close()
+	defer func() {
+		if closeErr := source.Close(); closeErr != nil {
+			t.Errorf("close sample file: %v", closeErr)
+		}
+	}()
 
 	persistedPath, err := persistToTemporaryFile(tempDir, source)
 	if err != nil {

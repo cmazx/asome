@@ -1,4 +1,13 @@
 services:
+  frontend:
+    image: cmazx/asome:frontend
+    container_name: asome-frontend
+    depends_on:
+      app:
+        condition: service_started
+    ports:
+      - "80:80"
+    restart: unless-stopped
   app:
     image: cmazx/asome:latest
     container_name: asome-app

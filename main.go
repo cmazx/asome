@@ -104,7 +104,7 @@ type temporalSearchParams struct {
 	FulltextWeight float64
 	TempWeight     float64
 	ResultLimit    int
-	FilterDocType  *string
+	FilterScope    *string
 }
 
 type repository interface {
@@ -174,16 +174,16 @@ func (r *gormRepository) createDocument(ctx context.Context, doc *document) erro
 
 func (r *gormRepository) temporalSearch(ctx context.Context, embedding []float64, params temporalSearchParams) ([]searchResult, error) {
 	vectorValue := formatVector(embedding)
-	filterDocType := any(nil)
-	if params.FilterDocType != nil {
-		filterDocType = *params.FilterDocType
+	filterScope := any(nil)
+	if params.FilterScope != nil {
+		filterScope = *params.FilterScope
 	}
 
 	var results []searchResult
 	err := r.db.WithContext(ctx).Raw(`
 		SELECT chunk_id, document_id, content, title, semantic_score, temporal_score, combined_score
 		FROM temporal_search(?::vector, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, vectorValue, params.QueryText, params.QueryTime, params.TimeDecayDays, params.SemanticWeight, params.FulltextWeight, params.TempWeight, params.ResultLimit, filterDocType).Scan(&results).Error
+	`, vectorValue, params.QueryText, params.QueryTime, params.TimeDecayDays, params.SemanticWeight, params.FulltextWeight, params.TempWeight, params.ResultLimit, filterScope).Scan(&results).Error
 	if err != nil {
 		return nil, err
 	}
@@ -668,7 +668,7 @@ type searchRequest struct {
 	FulltextWeight *float64   `json:"fulltext_weight,omitzero"`
 	TempWeight     *float64   `json:"temp_weight,omitzero"`
 	ResultLimit    *int       `json:"result_limit,omitzero"`
-	FilterDocType  *string    `json:"filter_doc_type,omitzero"`
+	FilterScope    *string    `json:"filter_scope,omitzero"`
 }
 
 type searchResponse struct {
@@ -851,10 +851,10 @@ func buildTemporalSearchParams(searchReq searchRequest, currentTime time.Time) (
 		}
 		params.ResultLimit = *searchReq.ResultLimit
 	}
-	if searchReq.FilterDocType != nil {
-		docType := strings.TrimSpace(*searchReq.FilterDocType)
-		if docType != "" {
-			params.FilterDocType = &docType
+	if searchReq.FilterScope != nil {
+		scope := strings.TrimSpace(*searchReq.FilterScope)
+		if scope != "" {
+			params.FilterScope = &scope
 		}
 	}
 

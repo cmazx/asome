@@ -57,7 +57,7 @@ CREATE OR REPLACE FUNCTION temporal_search(
     fulltext_weight FLOAT DEFAULT 0.2,  -- Новый вес
     temp_weight FLOAT DEFAULT 0.3,
     result_limit INT DEFAULT 10,
-    filter_doc_type TEXT DEFAULT NULL
+    filter_scope TEXT DEFAULT NULL
 )
     RETURNS TABLE(
                      chunk_id UUID,
@@ -93,7 +93,7 @@ BEGIN
         FROM chunks c
                  JOIN documents d ON c.document_id = d.id
         WHERE
-            (filter_doc_type IS NULL OR d.doc_type = filter_doc_type)
+            (filter_scope IS NULL OR c.scope = filter_scope)
           AND (d.expiry_date IS NULL OR d.expiry_date > query_time)
         ORDER BY combined_score DESC
         LIMIT result_limit;
