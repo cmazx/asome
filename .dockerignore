@@ -1,0 +1,5 @@
+.git
+.idea
+tei_data
+
+*.log

@@ -1,0 +1,98 @@
+services:
+  app:
+    image: cmazx/asome:latest
+    container_name: asome-app
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: asome
+      DB_PASSWORD: asome
+      DB_NAME: asome
+      OLLAMA_BASE_URL: http://tei:80
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tei:
+        condition: service_started
+    restart: unless-stopped
+    ports:
+      - "8880:8880"
+  postgres:
+    image: pgvector/pgvector:0.8.2-pg18-trixie
+    container_name: asome-postgres
+    environment:
+      POSTGRES_DB: asome
+      POSTGRES_USER: asome
+      POSTGRES_PASSWORD: asome
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data18:/var/lib/postgresql
+      - ./migration.sql:/docker-entrypoint-initdb.d/migration.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U asome -d asome"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+#  ollama:
+#    image: ollama/ollama:latest
+#    container_name: ollama
+#    ports:
+#      - "11434:11434"
+#    volumes:
+#      - ollama_data:/root/.ollama
+#    entrypoint: >
+#      sh -c "ollama serve & sleep 5 && ollama pull qwen3-embedding:4b && wait"
+#    restart: unless-stopped
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+#            - driver: nvidia
+#              count: all
+#              capabilities: [gpu]
+#  tei:
+#    image: ghcr.io/huggingface/text-embeddings-inference:cuda-1.9.2
+#    container_name: tei
+#    ports:
+#      - "8881:80"
+#    volumes:
+#      - ./tei_data:/data
+#    command: >
+#      --model-id trollathon/bge-m3-safetensors
+#    restart: unless-stopped
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+#            - driver: nvidia
+#              count: all
+#              capabilities: [gpu]
+  tei:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.2
+    container_name: tei
+    ports:
+      - "8881:80"
+    volumes:
+      - ./tei_data:/data
+    environment:
+      - OMP_NUM_THREADS=3
+      - MKL_NUM_THREADS=3
+      - MKL_DOMAIN_NUM_THREADS=MKL_BLAS=3
+      - MKL_DYNAMIC=FALSE
+      - OMP_DYNAMIC=FALSE
+      - TOKIO_WORKER_THREADS=3
+      - NUM_RAYON_THREADS=3
+    command: >
+      --model-id trollathon/bge-m3-safetensors
+    deploy:
+      resources:
+        limits:
+          cpus: '3.0'
+    restart: unless-stopped
+volumes:
+  postgres_data18:
+  ollama_data:
+  tei_data:
