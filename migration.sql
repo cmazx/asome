@@ -50,9 +50,11 @@ CREATE INDEX idx_chunks_content_trgm ON chunks USING GIN(content gin_trgm_ops);
 -- Функция: комбинированный поиск (семантика + время)
 CREATE OR REPLACE FUNCTION temporal_search(
     query_embedding halfvec(1024),
+    query_text TEXT,  -- Новый параметр
     query_time TIMESTAMPTZ DEFAULT now(),
     time_decay_days FLOAT DEFAULT 365.0,
-    semantic_weight FLOAT DEFAULT 0.7,
+    semantic_weight FLOAT DEFAULT 0.5,
+    fulltext_weight FLOAT DEFAULT 0.2,  -- Новый вес
     temp_weight FLOAT DEFAULT 0.3,
     result_limit INT DEFAULT 10,
     filter_doc_type TEXT DEFAULT NULL
@@ -63,6 +65,7 @@ CREATE OR REPLACE FUNCTION temporal_search(
                      content TEXT,
                      title TEXT,
                      semantic_score FLOAT,
+                     fulltext_score FLOAT,  -- Новый скор
                      temporal_score FLOAT,
                      combined_score FLOAT
                  ) AS $$
@@ -73,16 +76,15 @@ BEGIN
             d.id AS document_id,
             c.content,
             d.title,
-            -- Семантический скор (cosine similarity)
             (1 - (c.embedding <=> query_embedding))::FLOAT AS semantic_score,
-            -- Временной скор (экспоненциальное затухание)
+            similarity(c.content, query_text)::FLOAT AS fulltext_score,  -- Полнотекстовый скор [web:2]
             EXP(
                     -EXTRACT(EPOCH FROM (query_time - COALESCE(d.effective_date, d.created_at)))
                         / (time_decay_days * 86400)
             )::FLOAT AS temporal_score,
-            -- Комбинированный скор
             (
                 semantic_weight * (1 - (c.embedding <=> query_embedding)) +
+                fulltext_weight * similarity(c.content, query_text) +
                 temp_weight * EXP(
                         -EXTRACT(EPOCH FROM (query_time - COALESCE(d.effective_date, d.created_at)))
                             / (time_decay_days * 86400)

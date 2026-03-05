@@ -242,8 +242,39 @@ func TestSearchHandlerDefaultParameters(t *testing.T) {
 	if capturedParams.TimeDecayDays != defaultTimeDecayDays {
 		t.Fatalf("unexpected time_decay_days: %v", capturedParams.TimeDecayDays)
 	}
+	if capturedParams.FulltextWeight != defaultFulltextWeight {
+		t.Fatalf("unexpected fulltext_weight: %v", capturedParams.FulltextWeight)
+	}
 	if capturedParams.ResultLimit != defaultResultLimit {
 		t.Fatalf("unexpected result_limit: %d", capturedParams.ResultLimit)
+	}
+}
+
+func TestSearchHandlerFulltextWeightOverride(t *testing.T) {
+	var capturedParams temporalSearchParams
+
+	appInstance := &App{
+		now: time.Now,
+		embeddingClient: &stubEmbeddingClient{embedFn: func(_ context.Context, _ string) ([]float64, error) {
+			return []float64{0.1, 0.2}, nil
+		}},
+		repo: &stubRepository{temporalSearchFn: func(_ context.Context, _ []float64, params temporalSearchParams) ([]searchResult, error) {
+			capturedParams = params
+			return nil, nil
+		}},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(`{"query":"test","fulltext_weight":0.4}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+
+	appInstance.searchHandler(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, res.Code)
+	}
+	if capturedParams.FulltextWeight != 0.4 {
+		t.Fatalf("unexpected fulltext_weight: %v", capturedParams.FulltextWeight)
 	}
 }
 
@@ -254,14 +285,21 @@ func TestSearchHandlerInvalidOverride(t *testing.T) {
 		repo:            &stubRepository{},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(`{"query":"test","result_limit":0}`))
-	req.Header.Set("Content-Type", "application/json")
-	res := httptest.NewRecorder()
+	invalidRequests := []string{
+		`{"query":"test","result_limit":0}`,
+		`{"query":"test","fulltext_weight":1.2}`,
+	}
 
-	appInstance.searchHandler(res, req)
+	for _, body := range invalidRequests {
+		req := httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
 
-	if res.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.Code)
+		appInstance.searchHandler(res, req)
+
+		if res.Code != http.StatusBadRequest {
+			t.Fatalf("expected status %d, got %d for body %s", http.StatusBadRequest, res.Code, body)
+		}
 	}
 }
 

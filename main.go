@@ -29,6 +29,7 @@ const (
 	maxUploadSizeBytes    = 100 << 20
 	defaultTimeDecayDays  = 365.0
 	defaultSemanticWeight = 0.7
+	defaultFulltextWeight = 0.2
 	defaultTempWeight     = 0.3
 	defaultResultLimit    = 10
 	defaultEmbeddingModel = "qwen3-embedding:4b"
@@ -96,9 +97,11 @@ type searchResult struct {
 }
 
 type temporalSearchParams struct {
+	QueryText      string
 	QueryTime      time.Time
 	TimeDecayDays  float64
 	SemanticWeight float64
+	FulltextWeight float64
 	TempWeight     float64
 	ResultLimit    int
 	FilterDocType  *string
@@ -179,8 +182,8 @@ func (r *gormRepository) temporalSearch(ctx context.Context, embedding []float64
 	var results []searchResult
 	err := r.db.WithContext(ctx).Raw(`
 		SELECT chunk_id, document_id, content, title, semantic_score, temporal_score, combined_score
-		FROM temporal_search(?::vector, ?, ?, ?, ?, ?, ?)
-	`, vectorValue, params.QueryTime, params.TimeDecayDays, params.SemanticWeight, params.TempWeight, params.ResultLimit, filterDocType).Scan(&results).Error
+		FROM temporal_search(?::vector, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, vectorValue, params.QueryText, params.QueryTime, params.TimeDecayDays, params.SemanticWeight, params.FulltextWeight, params.TempWeight, params.ResultLimit, filterDocType).Scan(&results).Error
 	if err != nil {
 		return nil, err
 	}
@@ -390,15 +393,19 @@ func (a *App) processDocument(ctx context.Context, doc document) error {
 
 	file, err := os.Open(doc.TemporalPath)
 	if err != nil {
-		return fmt.Errorf("open temporal file %s: %w", doc.TemporalPath, err)
+		return a.storeDocumentProcessingErrorWithChunkCleanup(ctx, doc.ID, fmt.Errorf("open temporal file %s: %w", doc.TemporalPath, err))
 	}
-	defer func() {
-		if closeErr := file.Close(); closeErr != nil {
-			log.Printf("failed to close temporal file %s: %v", doc.TemporalPath, closeErr)
+	processErr := a.processDocumentChunksFromFile(ctx, file, &doc)
+	closeErr := file.Close()
+	if processErr != nil {
+		if closeErr != nil {
+			processErr = errors.Join(processErr, fmt.Errorf("close temporal file %s: %w", doc.TemporalPath, closeErr))
 		}
-	}()
-	if err := a.processDocumentChunksFromFile(ctx, file, &doc); err != nil {
-		return a.storeDocumentProcessingErrorWithChunkCleanup(ctx, doc.ID, err)
+
+		return a.storeDocumentProcessingErrorWithChunkCleanup(ctx, doc.ID, processErr)
+	}
+	if closeErr != nil {
+		return a.storeDocumentProcessingErrorWithChunkCleanup(ctx, doc.ID, fmt.Errorf("close temporal file %s: %w", doc.TemporalPath, closeErr))
 	}
 
 	if err := os.Remove(doc.TemporalPath); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -658,6 +665,7 @@ type searchRequest struct {
 	QueryTime      *time.Time `json:"query_time,omitzero"`
 	TimeDecayDays  *float64   `json:"time_decay_days,omitzero"`
 	SemanticWeight *float64   `json:"semantic_weight,omitzero"`
+	FulltextWeight *float64   `json:"fulltext_weight,omitzero"`
 	TempWeight     *float64   `json:"temp_weight,omitzero"`
 	ResultLimit    *int       `json:"result_limit,omitzero"`
 	FilterDocType  *string    `json:"filter_doc_type,omitzero"`
@@ -801,9 +809,11 @@ func persistToTemporaryFile(tempDir string, source multipart.File) (string, erro
 
 func buildTemporalSearchParams(searchReq searchRequest, currentTime time.Time) (temporalSearchParams, error) {
 	params := temporalSearchParams{
+		QueryText:      strings.TrimSpace(searchReq.Query),
 		QueryTime:      currentTime,
 		TimeDecayDays:  defaultTimeDecayDays,
 		SemanticWeight: defaultSemanticWeight,
+		FulltextWeight: defaultFulltextWeight,
 		TempWeight:     defaultTempWeight,
 		ResultLimit:    defaultResultLimit,
 	}
@@ -822,6 +832,12 @@ func buildTemporalSearchParams(searchReq searchRequest, currentTime time.Time) (
 			return temporalSearchParams{}, errors.New("semantic_weight must be between 0 and 1")
 		}
 		params.SemanticWeight = *searchReq.SemanticWeight
+	}
+	if searchReq.FulltextWeight != nil {
+		if *searchReq.FulltextWeight < 0 || *searchReq.FulltextWeight > 1 {
+			return temporalSearchParams{}, errors.New("fulltext_weight must be between 0 and 1")
+		}
+		params.FulltextWeight = *searchReq.FulltextWeight
 	}
 	if searchReq.TempWeight != nil {
 		if *searchReq.TempWeight < 0 || *searchReq.TempWeight > 1 {
