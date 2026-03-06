@@ -219,7 +219,7 @@ func TestRecentDocumentsHandlerSuccess(t *testing.T) {
 		}},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/documents/recent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/documents/recent?limit=20", nil)
 	res := httptest.NewRecorder()
 
 	appInstance.recentDocumentsHandler(res, req)
@@ -246,6 +246,45 @@ func TestRecentDocumentsHandlerSuccess(t *testing.T) {
 	}
 	if payload.Documents[1].ProcessingError == nil || *payload.Documents[1].ProcessingError != processingError {
 		t.Fatalf("unexpected second processing_error: %v", payload.Documents[1].ProcessingError)
+	}
+}
+
+func TestRecentDocumentsHandlerCustomLimit(t *testing.T) {
+	appInstance := &App{
+		repo: &stubRepository{listRecentDocumentsFn: func(_ context.Context, limit int) ([]document, error) {
+			if limit != 7 {
+				t.Fatalf("unexpected recent documents limit: %d", limit)
+			}
+
+			return []document{}, nil
+		}},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/documents/recent?limit=7", nil)
+	res := httptest.NewRecorder()
+
+	appInstance.recentDocumentsHandler(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, res.Code)
+	}
+}
+
+func TestRecentDocumentsHandlerInvalidLimit(t *testing.T) {
+	appInstance := &App{
+		repo: &stubRepository{listRecentDocumentsFn: func(_ context.Context, _ int) ([]document, error) {
+			t.Fatal("repository should not be called for invalid limit")
+			return nil, nil
+		}},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/documents/recent?limit=zero", nil)
+	res := httptest.NewRecorder()
+
+	appInstance.recentDocumentsHandler(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, res.Code)
 	}
 }
 
@@ -352,6 +391,33 @@ func TestSearchHandlerFulltextWeightOverride(t *testing.T) {
 	}
 	if capturedParams.FilterScope == nil || *capturedParams.FilterScope != "hr" {
 		t.Fatalf("unexpected filter_scope: %v", capturedParams.FilterScope)
+	}
+}
+
+func TestSearchHandlerReturnsEmptyResultsArray(t *testing.T) {
+	appInstance := &App{
+		now: time.Now,
+		embeddingClient: &stubEmbeddingClient{embedFn: func(_ context.Context, _ string) ([]float64, error) {
+			return []float64{0.1, 0.2}, nil
+		}},
+		repo: &stubRepository{temporalSearchFn: func(_ context.Context, _ []float64, _ temporalSearchParams) ([]searchResult, error) {
+			return nil, nil
+		}},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(`{"query":"test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+
+	appInstance.searchHandler(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, res.Code)
+	}
+
+	body := res.Body.String()
+	if !strings.Contains(body, `"results":[]`) {
+		t.Fatalf("expected results to be an empty array, got body: %s", body)
 	}
 }
 

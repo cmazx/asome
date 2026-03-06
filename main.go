@@ -32,7 +32,7 @@ const (
 	defaultFulltextWeight  = 0.2
 	defaultTempWeight      = 0.3
 	defaultResultLimit     = 10
-	defaultRecentDocuments = 5
+	defaultRecentDocuments = 20
 	defaultEmbeddingModel  = "qwen3-embedding:4b"
 
 	defaultProcessingPollInterval = 2 * time.Second
@@ -766,7 +766,19 @@ func (a *App) uploadDocumentHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) recentDocumentsHandler(w http.ResponseWriter, r *http.Request) {
-	docs, err := a.repo.listRecentDocuments(r.Context(), defaultRecentDocuments)
+	limit := defaultRecentDocuments
+	rawLimit := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err != nil || parsedLimit <= 0 {
+			respondError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+
+		limit = parsedLimit
+	}
+
+	docs, err := a.repo.listRecentDocuments(r.Context(), limit)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to list recent documents")
 		return
@@ -813,6 +825,9 @@ func (a *App) searchHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "search query failed")
 		return
+	}
+	if results == nil {
+		results = []searchResult{}
 	}
 
 	respondJSON(w, http.StatusOK, searchResponse{Results: results})

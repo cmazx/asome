@@ -90,7 +90,7 @@ describe('fetchRecentDocuments', () => {
     const documents = await fetchRecentDocuments()
 
     expect(documents).toEqual([{ title: 'doc.txt', processing_time: 9 }])
-    expect(fetchMock).toHaveBeenCalledWith('/api/documents/recent', undefined)
+    expect(fetchMock).toHaveBeenCalledWith('/api/documents/recent?limit=20', undefined)
   })
 
   it('повторяет запрос без /api, если первый ответ 404', async () => {
@@ -113,8 +113,8 @@ describe('fetchRecentDocuments', () => {
     const documents = await fetchRecentDocuments()
 
     expect(documents).toEqual([{ title: 'doc2.txt', processing_error: 'oops' }])
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/documents/recent', undefined)
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/documents/recent', undefined)
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/documents/recent?limit=20', undefined)
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/documents/recent?limit=20', undefined)
   })
 
   it('выбрасывает ошибку, когда запрос завершился неуспешно', async () => {

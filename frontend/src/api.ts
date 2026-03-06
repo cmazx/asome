@@ -9,6 +9,7 @@ export const defaultSearchModifiers = {
 } as const
 
 const configuredApiBase = import.meta.env.VITE_API_BASE?.trim()
+const recentDocumentsLimit = 20
 
 function normalizeApiBase(base: string): string {
   if (base === '/') {
@@ -166,7 +167,7 @@ export async function search(input: SearchInput): Promise<SearchResult[]> {
 }
 
 export async function fetchRecentDocuments(): Promise<RecentDocument[]> {
-  const response = await fetchAPI('/documents/recent')
+  const response = await fetchAPI(`/documents/recent?limit=${recentDocumentsLimit}`)
   if (!response.ok) {
     throw new Error(await parseError(response, 'Не удалось получить последние документы'))
   }
